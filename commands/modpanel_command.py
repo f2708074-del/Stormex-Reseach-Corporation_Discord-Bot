@@ -61,40 +61,31 @@ class ModerationPanel(commands.Cog):
         user: discord.Member,
         action: app_commands.Choice[str]
     ):
-        # Defer the response to allow more time for processing
-        await interaction.response.defer(ephemeral=True)
-        
         action_value = action.value
         
         if action_value == "ban":
-            # Ask for ban reason
             modal = BanModal(user)
-            await interaction.followup.send("Please provide the ban reason:", view=modal, ephemeral=True)
+            await interaction.response.send_modal(modal)
             
         elif action_value == "kick":
-            # Ask for kick reason
             modal = KickModal(user)
-            await interaction.followup.send("Please provide the kick reason:", view=modal, ephemeral=True)
+            await interaction.response.send_modal(modal)
             
         elif action_value == "timeout":
-            # Ask for timeout duration and reason
             modal = TimeoutModal(user)
-            await interaction.followup.send("Please provide timeout details:", view=modal, ephemeral=True)
+            await interaction.response.send_modal(modal)
             
         elif action_value == "add_role":
-            # Ask for role to add
             modal = AddRoleModal(user)
-            await interaction.followup.send("Please specify the role to add:", view=modal, ephemeral=True)
+            await interaction.response.send_modal(modal)
             
         elif action_value == "remove_role":
-            # Ask for role to remove
             modal = RemoveRoleModal(user)
-            await interaction.followup.send("Please specify the role to remove:", view=modal, ephemeral=True)
+            await interaction.response.send_modal(modal)
             
         elif action_value == "purge":
-            # Ask for number of messages to purge
             modal = PurgeModal()
-            await interaction.followup.send("Please specify the number of messages to purge:", view=modal, ephemeral=True)
+            await interaction.response.send_modal(modal)
 
 # Modals for different actions
 class BanModal(discord.ui.Modal, title="Ban User"):
@@ -123,7 +114,7 @@ class BanModal(discord.ui.Modal, title="Ban User"):
             )
         except Exception as e:
             await interaction.response.send_message(
-                f"An error occurred: {str(e)}",
+                f"An error occurred while executing the command: {str(e)}",
                 ephemeral=True
             )
 
@@ -153,7 +144,7 @@ class KickModal(discord.ui.Modal, title="Kick User"):
             )
         except Exception as e:
             await interaction.response.send_message(
-                f"An error occurred: {str(e)}",
+                f"An error occurred while executing the command: {str(e)}",
                 ephemeral=True
             )
 
@@ -197,7 +188,7 @@ class TimeoutModal(discord.ui.Modal, title="Timeout User"):
             )
         except Exception as e:
             await interaction.response.send_message(
-                f"An error occurred: {str(e)}",
+                f"An error occurred while executing the command: {str(e)}",
                 ephemeral=True
             )
 
@@ -240,7 +231,7 @@ class AddRoleModal(discord.ui.Modal, title="Add Role to User"):
             )
         except Exception as e:
             await interaction.response.send_message(
-                f"An error occurred: {str(e)}",
+                f"An error occurred while executing the command: {str(e)}",
                 ephemeral=True
             )
 
@@ -283,7 +274,7 @@ class RemoveRoleModal(discord.ui.Modal, title="Remove Role from User"):
             )
         except Exception as e:
             await interaction.response.send_message(
-                f"An error occurred: {str(e)}",
+                f"An error occurred while executing the command: {str(e)}",
                 ephemeral=True
             )
 
@@ -326,7 +317,7 @@ class PurgeModal(discord.ui.Modal, title="Purge Messages"):
             )
         except Exception as e:
             await interaction.response.send_message(
-                f"An error occurred: {str(e)}",
+                f"An error occurred while executing the command: {str(e)}",
                 ephemeral=True
             )
 
