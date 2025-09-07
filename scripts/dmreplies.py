@@ -1,52 +1,20 @@
 import discord
 from discord.ext import commands
-import os
 
-# Configuration
-BOT_OWNER_ID = int(os.environ.get('BOT_OWNER_ID', 0))  # Get your user ID from environment variable
-ALLOWED_GUILD = int(os.environ.get('ALLOWED_GUILD', 0))  # Your server ID from environment variable
+# Configuration - HARDCODED VALUES
+BOT_OWNER_ID = 842832497044881438  # REPLACE WITH YOUR DISCORD USER ID
 
 class DMForwarding(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.forward_channel_id = None
         self.user_message_map = {}  # Maps your messages to original users
-
-    async def setup_forward_channel(self):
-        """Setup the forwarding channel in the allowed guild"""
-        guild = self.bot.get_guild(ALLOWED_GUILD)
-        if not guild:
-            print(f"Error: Could not find guild with ID {ALLOWED_GUILD}")
-            return
-            
-        # Try to find an existing channel
-        for channel in guild.text_channels:
-            if channel.name == "bot-dm-forwarding":
-                self.forward_channel_id = channel.id
-                return
-                
-        # Create a new channel if it doesn't exist
-        try:
-            overwrites = {
-                guild.default_role: discord.PermissionOverwrite(read_messages=False),
-                guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
-            }
-            new_channel = await guild.create_text_channel(
-                "bot-dm-forwarding",
-                overwrites=overwrites,
-                reason="Channel for forwarding DMs to the bot owner"
-            )
-            self.forward_channel_id = new_channel.id
-            await new_channel.send("This channel is for forwarding DMs sent to the bot. Reply to a message to respond to the user.")
-        except discord.Forbidden:
-            print("Error: Bot doesn't have permission to create channels")
-        except Exception as e:
-            print(f"Error creating channel: {e}")
+        self.owner = None
 
     @commands.Cog.listener()
     async def on_ready(self):
         print(f'{self.bot.user} has connected to Discord!')
-        await self.setup_forward_channel()
+        # Get the owner user object
+        self.owner = await self.bot.fetch_user(BOT_OWNER_ID)
 
     @commands.Cog.listener()
     async def on_message(self, message):
@@ -54,16 +22,15 @@ class DMForwarding(commands.Cog):
         if message.author == self.bot.user:
             return
             
-        # Handle DMs to the bot
-        if isinstance(message.channel, discord.DMChannel):
+        # Handle DMs to the bot (global, from any user)
+        if isinstance(message.channel, discord.DMChannel) and message.author != self.owner:
             # Don't process commands in DMs for this cog
             if message.content.startswith(self.bot.command_prefix):
                 return
                 
-            # Forward the DM to the designated channel
-            if self.forward_channel_id:
-                channel = self.bot.get_channel(self.forward_channel_id)
-                if channel:
+            # Forward the DM to the owner
+            if self.owner:
+                try:
                     # Create an embed with the user's message
                     embed = discord.Embed(
                         title=f"DM from {message.author}",
@@ -73,23 +40,30 @@ class DMForwarding(commands.Cog):
                     )
                     embed.set_footer(text=f"User ID: {message.author.id}")
                     
-                    # Send the embed and store the mapping
-                    forwarded_msg = await channel.send(embed=embed)
+                    # Add any attachments
+                    if message.attachments:
+                        attachment_urls = "\n".join([attachment.url for attachment in message.attachments])
+                        embed.add_field(name="Attachments", value=attachment_urls, inline=False)
+                    
+                    # Send the embed to the owner and store the mapping
+                    forwarded_msg = await self.owner.send(embed=embed)
                     self.user_message_map[forwarded_msg.id] = message.author.id
                     
                     # Send a confirmation to the user
                     await message.channel.send("Your message has been forwarded to the bot owner. They will respond when available.")
+                except discord.Forbidden:
+                    print("Error: Cannot send messages to the owner. The owner might have DMs disabled.")
 
-        # Handle replies in the forwarding channel
-        elif (message.channel.id == self.forward_channel_id and 
-              message.reference and 
-              message.author.id == BOT_OWNER_ID and
+        # Handle replies from the owner
+        elif (isinstance(message.channel, discord.DMChannel) and 
+              message.author == self.owner and
+              message.reference and
               not message.content.startswith(self.bot.command_prefix)):
             
             # Get the original forwarded message
             try:
-                original_msg = await message.channel.fetch_message(message.reference.message_id)
-                user_id = self.user_message_map.get(original_msg.id)
+                original_msg_id = message.reference.message_id
+                user_id = self.user_message_map.get(original_msg_id)
                 
                 if user_id:
                     user = await self.bot.fetch_user(user_id)
