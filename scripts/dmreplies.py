@@ -3,7 +3,7 @@ from discord.ext import commands
 import asyncio
 
 # Configuration - HARDCODED VALUES
-BOT_OWNER_ID = 123456789012345678  # REPLACE WITH YOUR DISCORD USER ID
+BOT_OWNER_ID = 842832497044881438  # REPLACE WITH YOUR DISCORD USER ID
 
 class DMForwarding(commands.Cog):
     def __init__(self, bot):
