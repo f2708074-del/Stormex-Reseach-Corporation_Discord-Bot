@@ -15,7 +15,6 @@ class DMForwarding(commands.Cog):
         self.pending_invitations = {}  # {invitation_msg_id: invitation_info}
         self.authorized_users = {}  # {target_user_id: set(authorized_user_ids)}
         self.conversation_history = {}  # {target_user_id: list(messages)}
-        self.user_management_msgs = {}  # {management_msg_id: management_info}
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -72,13 +71,13 @@ class DMForwarding(commands.Cog):
             "sender": target_user.id,
             "content": message.content,
             "timestamp": datetime.now(),
-            "attachments": [a.url for a in message.attachments]
+            "attachments": [a.url for a in message.attachments],
+            "type": "incoming"
         })
         
-        # Send to owner
+        # Send to owner with different color for authorized users
         try:
             owner_msg = await self.owner.send(embed=embed)
-            await owner_msg.add_reaction("✅")  # Accept/Respond
             await owner_msg.add_reaction("👥")  # Manage users
             await owner_msg.add_reaction("❌")  # Reject
             
@@ -91,13 +90,26 @@ class DMForwarding(commands.Cog):
         except discord.Forbidden:
             print("Error: Cannot send messages to the owner. The owner might have DMs disabled.")
         
-        # Send to authorized users for this conversation
+        # Send to authorized users for this conversation with different color
         if target_user.id in self.authorized_users:
             for user_id in self.authorized_users[target_user.id]:
                 try:
                     user = await self.bot.fetch_user(user_id)
-                    user_msg = await user.send(embed=embed)
-                    await user_msg.add_reaction("✅")  # Respond
+                    
+                    # Create a different colored embed for authorized users
+                    auth_embed = discord.Embed(
+                        title=f"📩 DM from {message.author} (Shared)",
+                        description=message.content,
+                        color=discord.Color.purple(),  # Different color
+                        timestamp=message.created_at
+                    )
+                    auth_embed.set_footer(text=f"User ID: {message.author.id}")
+                    
+                    if message.attachments:
+                        attachment_urls = "\n".join([attachment.url for attachment in message.attachments])
+                        auth_embed.add_field(name="Attachments", value=attachment_urls, inline=False)
+                    
+                    user_msg = await user.send(embed=auth_embed)
                     
                     self.pending_messages[user_msg.id] = {
                         "type": "forwarded_message",
@@ -133,14 +145,13 @@ class DMForwarding(commands.Cog):
                         response_embed.set_author(name="Authorized Assistant")
                     
                     await target_user.send(embed=response_embed)
-                    await message.add_reaction("✅")  # Confirm delivery
                     
                     # Also send to owner if the responder is not the owner
                     if responder.id != BOT_OWNER_ID:
                         owner_notification = discord.Embed(
                             title=f"📤 {responder.name} responded to {target_user.name}",
                             description=message.content,
-                            color=discord.Color.purple(),
+                            color=discord.Color.orange(),  # Different color for authorized user responses
                             timestamp=datetime.now()
                         )
                         await self.owner.send(embed=owner_notification)
@@ -153,7 +164,8 @@ class DMForwarding(commands.Cog):
                         "sender": responder.id,
                         "content": message.content,
                         "timestamp": datetime.now(),
-                        "responder_name": responder.name
+                        "responder_name": responder.name,
+                        "type": "outgoing"
                     })
                     
                 except discord.Forbidden:
@@ -177,20 +189,12 @@ class DMForwarding(commands.Cog):
         # Handle reactions on invitation messages
         elif reaction.message.id in self.pending_invitations:
             await self.handle_invitation_reaction(reaction, user)
-            
-        # Handle reactions on user management messages
-        elif reaction.message.id in self.user_management_msgs:
-            await self.handle_management_reaction(reaction, user)
 
     async def handle_forwarded_message_reaction(self, reaction, user, message_info):
         """Handle reactions on forwarded messages"""
         target_user = message_info["target_user"]
         
-        if str(reaction.emoji) == "✅":
-            # User wants to respond - handled by reply system
-            pass
-                
-        elif str(reaction.emoji) == "❌" and user.id == BOT_OWNER_ID:
+        if str(reaction.emoji) == "❌" and user.id == BOT_OWNER_ID:
             # Owner wants to reject the message
             await self.handle_rejection(reaction, target_user, message_info)
                 
@@ -214,28 +218,6 @@ class DMForwarding(commands.Cog):
                 await reaction.message.delete()
                 del self.pending_invitations[reaction.message.id]
 
-    async def handle_management_reaction(self, reaction, user):
-        """Handle reactions on user management messages"""
-        if user.id != BOT_OWNER_ID:
-            return
-            
-        management_info = self.user_management_msgs[reaction.message.id]
-        target_user = management_info["target_user"]
-        
-        if str(reaction.emoji) == "👤":
-            # Add a new user
-            await self.invite_new_user(reaction, target_user)
-        elif str(reaction.emoji) == "🚫":
-            # Remove a user
-            await self.show_remove_user_options(reaction, target_user)
-        elif str(reaction.emoji) == "📜":
-            # Show conversation history
-            await self.show_conversation_history(reaction, target_user)
-        elif str(reaction.emoji) == "🔙":
-            # Go back to main management
-            await reaction.message.delete()
-            await self.show_user_management(reaction, target_user, from_remove=True)
-
     async def handle_rejection(self, reaction, target_user, message_info):
         """Handle message rejection by owner"""
         # Delete all related messages
@@ -258,13 +240,12 @@ class DMForwarding(commands.Cog):
         # Remove from pending messages
         del self.pending_messages[reaction.message.id]
 
-    async def show_user_management(self, reaction, target_user, from_remove=False):
+    async def show_user_management(self, reaction, target_user):
         """Show user management options for a conversation"""
-        if not from_remove:
-            try:
-                await reaction.message.clear_reactions()
-            except:
-                pass
+        try:
+            await reaction.message.clear_reactions()
+        except:
+            pass
         
         # Create management embed
         management_embed = discord.Embed(
@@ -314,12 +295,12 @@ class DMForwarding(commands.Cog):
         await management_msg.add_reaction("❌")  # Close
         
         # Store management message info
-        self.user_management_msgs[management_msg.id] = {
+        self.pending_messages[management_msg.id] = {
             "type": "user_management",
             "target_user": target_user
         }
 
-    async def invite_new_user(self, reaction, target_user):
+    async def invite_new_user(self, target_user):
         """Invite a new user to the conversation"""
         # Ask for user ID
         ask_msg = await self.owner.send("Please provide the user ID to authorize for this conversation.")
@@ -371,14 +352,36 @@ class DMForwarding(commands.Cog):
         except Exception as e:
             await self.owner.send(f"An error occurred: {e}")
 
-    async def show_remove_user_options(self, reaction, target_user):
-        """Show options for removing users from a conversation"""
-        # Clear previous reactions
+    async def remove_user(self, target_user, user_id_to_remove):
+        """Remove a user from a conversation"""
         try:
-            await reaction.message.clear_reactions()
-        except:
-            pass
-        
+            # Remove from authorized users
+            if target_user.id in self.authorized_users and user_id_to_remove in self.authorized_users[target_user.id]:
+                self.authorized_users[target_user.id].remove(user_id_to_remove)
+                
+                # Get the user object for the removed user
+                removed_user = await self.bot.fetch_user(user_id_to_remove)
+                
+                # Notify the removed user
+                try:
+                    await removed_user.send(f"You have been removed from the conversation with {target_user.name}.")
+                except:
+                    pass
+                
+                # Send confirmation to owner
+                await self.owner.send(f"User {removed_user.name} has been successfully removed from the conversation with {target_user.name}.")
+                
+                return True
+            else:
+                await self.owner.send("This user is not authorized for this conversation.")
+                return False
+                
+        except Exception as e:
+            await self.owner.send(f"An error occurred while removing the user: {e}")
+            return False
+
+    async def show_remove_user_options(self, target_user):
+        """Show options for removing users from a conversation"""
         authorized_users = self.authorized_users.get(target_user.id, set())
         
         if not authorized_users:
@@ -387,37 +390,24 @@ class DMForwarding(commands.Cog):
                 description="There are no authorized users for this conversation.",
                 color=discord.Color.red()
             )
-            no_users_msg = await self.owner.send(embed=no_users_embed)
-            await no_users_msg.add_reaction("🔙")  # Go back
-            self.user_management_msgs[no_users_msg.id] = {
-                "type": "remove_user",
-                "target_user": target_user
-            }
+            await self.owner.send(embed=no_users_embed)
             return
         
         # Create remove user embed
         remove_embed = discord.Embed(
             title=f"🚫 Remove User from {target_user.name}'s Conversation",
-            description="React with the number corresponding to the user you want to remove:",
+            description="Please provide the user ID to remove from this conversation:",
             color=discord.Color.red()
         )
         
-        # List users with numbers
-        number_emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣"]
+        # List authorized users
         users_list = []
-        user_mapping = {}
-        
-        for i, user_id in enumerate(authorized_users):
-            if i >= len(number_emojis):
-                break
-                
+        for user_id in authorized_users:
             try:
                 user_obj = await self.bot.fetch_user(user_id)
-                users_list.append(f"{number_emojis[i]} {user_obj.name} (ID: {user_id})")
-                user_mapping[number_emojis[i]] = user_id
+                users_list.append(f"{user_obj.name} (ID: {user_id})")
             except:
-                users_list.append(f"{number_emojis[i]} Unknown User (ID: {user_id})")
-                user_mapping[number_emojis[i]] = user_id
+                users_list.append(f"Unknown User (ID: {user_id})")
         
         remove_embed.add_field(
             name="Authorized Users",
@@ -426,21 +416,76 @@ class DMForwarding(commands.Cog):
         )
         
         # Send remove options message
-        remove_msg = await self.owner.send(embed=remove_embed)
+        await self.owner.send(embed=remove_embed)
         
-        # Add number reactions for each user
-        for i in range(min(len(authorized_users), len(number_emojis))):
-            await remove_msg.add_reaction(number_emojis[i])
+        # Ask for user ID to remove
+        ask_msg = await self.owner.send("Please provide the ID of the user you want to remove:")
         
-        # Add back button
-        await remove_msg.add_reaction("🔙")
+        def check(m):
+            return m.author.id == BOT_OWNER_ID and m.channel == ask_msg.channel
         
-        # Store remove message info
-        self.user_management_msgs[remove_msg.id] = {
-            "type": "remove_user",
-            "target_user": target_user,
-            "user_mapping": user_mapping
-        }
+        try:
+            # Wait for user ID
+            response = await self.bot.wait_for('message', timeout=60.0, check=check)
+            user_id = int(response.content)
+            
+            # Remove the user
+            success = await self.remove_user(target_user, user_id)
+            
+            if success:
+                # Show management menu again
+                await self.show_user_management(None, target_user)
+            
+        except asyncio.TimeoutError:
+            await self.owner.send("Timed out waiting for user ID.")
+        except ValueError:
+            await self.owner.send("Invalid user ID. Please provide a numeric user ID.")
+        except Exception as e:
+            await self.owner.send(f"An error occurred: {e}")
+
+    async def show_conversation_history(self, target_user):
+        """Show conversation history for a user"""
+        history = self.conversation_history.get(target_user.id, [])
+        
+        if not history:
+            no_history_embed = discord.Embed(
+                title="No Conversation History",
+                description="There is no history for this conversation yet.",
+                color=discord.Color.blue()
+            )
+            await self.owner.send(embed=no_history_embed)
+            return
+        
+        # Create history embed
+        history_embed = discord.Embed(
+            title=f"📜 Conversation History with {target_user.name}",
+            description=f"Total messages: {len(history)}",
+            color=discord.Color.purple(),
+            timestamp=datetime.now()
+        )
+        
+        # Add last 10 messages to history
+        recent_messages = history[-10:]
+        for msg in recent_messages:
+            try:
+                sender = await self.bot.fetch_user(msg["sender"])
+                sender_name = sender.name
+            except:
+                sender_name = f"User {msg['sender']}"
+            
+            # Format timestamp
+            time_str = msg["timestamp"].strftime("%Y-%m-%d %H:%M")
+            
+            # Determine message direction
+            direction = "➡️" if msg.get("type") == "outgoing" else "⬅️"
+            
+            history_embed.add_field(
+                name=f"{direction} {sender_name} ({time_str})",
+                value=msg["content"][:500] + ("..." if len(msg["content"]) > 500 else ""),
+                inline=False
+            )
+        
+        await self.owner.send(embed=history_embed)
 
     async def accept_invitation(self, invitation_info, reaction):
         """Handle invitation acceptance"""
@@ -470,8 +515,11 @@ class DMForwarding(commands.Cog):
                 except:
                     sender_name = f"User {msg['sender']}"
                 
+                # Determine message direction
+                direction = "➡️" if msg.get("type") == "outgoing" else "⬅️"
+                
                 history_embed.add_field(
-                    name=f"{sender_name} ({msg['timestamp'].strftime('%H:%M')})",
+                    name=f"{direction} {sender_name} ({msg['timestamp'].strftime('%H:%M')})",
                     value=msg["content"][:100] + ("..." if len(msg["content"]) > 100 else ""),
                     inline=False
                 )
@@ -514,63 +562,41 @@ class DMForwarding(commands.Cog):
         except:
             pass
 
-    async def show_conversation_history(self, reaction, target_user):
-        """Show conversation history for a user"""
-        # Clear previous reactions
-        try:
-            await reaction.message.clear_reactions()
-        except:
-            pass
-        
-        history = self.conversation_history.get(target_user.id, [])
-        
-        if not history:
-            no_history_embed = discord.Embed(
-                title="No Conversation History",
-                description="There is no history for this conversation yet.",
-                color=discord.Color.blue()
-            )
-            no_history_msg = await self.owner.send(embed=no_history_embed)
-            await no_history_msg.add_reaction("🔙")  # Go back
-            self.user_management_msgs[no_history_msg.id] = {
-                "type": "conversation_history",
-                "target_user": target_user
-            }
+    @commands.Cog.listener()
+    async def on_reaction_add(self, reaction, user):
+        # Ignore bot's own reactions
+        if user == self.bot.user:
             return
-        
-        # Create history embed
-        history_embed = discord.Embed(
-            title=f"📜 Conversation History with {target_user.name}",
-            description=f"Total messages: {len(history)}",
-            color=discord.Color.purple(),
-            timestamp=datetime.now()
-        )
-        
-        # Add last 10 messages to history
-        recent_messages = history[-10:]
-        for msg in recent_messages:
-            try:
-                sender = await self.bot.fetch_user(msg["sender"])
-                sender_name = sender.name
-            except:
-                sender_name = f"User {msg['sender']}"
             
-            # Format timestamp
-            time_str = msg["timestamp"].strftime("%Y-%m-%d %H:%M")
+        # Handle reactions on forwarded messages
+        if reaction.message.id in self.pending_messages:
+            message_info = self.pending_messages[reaction.message.id]
             
-            history_embed.add_field(
-                name=f"{sender_name} ({time_str})",
-                value=msg["content"][:500] + ("..." if len(msg["content"]) > 500 else ""),
-                inline=False
-            )
+            if message_info["type"] == "forwarded_message":
+                await self.handle_forwarded_message_reaction(reaction, user, message_info)
+            elif message_info["type"] == "user_management" and user.id == BOT_OWNER_ID:
+                await self.handle_management_reaction(reaction, user, message_info)
+                
+        # Handle reactions on invitation messages
+        elif reaction.message.id in self.pending_invitations:
+            await self.handle_invitation_reaction(reaction, user)
+
+    async def handle_management_reaction(self, reaction, user, message_info):
+        """Handle reactions on management messages"""
+        target_user = message_info["target_user"]
         
-        history_msg = await self.owner.send(embed=history_embed)
-        await history_msg.add_reaction("🔙")  # Go back
-        
-        self.user_management_msgs[history_msg.id] = {
-            "type": "conversation_history",
-            "target_user": target_user
-        }
+        if str(reaction.emoji) == "👤":
+            # Add a new user
+            await self.invite_new_user(target_user)
+        elif str(reaction.emoji) == "🚫":
+            # Remove a user
+            await self.show_remove_user_options(target_user)
+        elif str(reaction.emoji) == "📜":
+            # Show conversation history
+            await self.show_conversation_history(target_user)
+        elif str(reaction.emoji) == "❌":
+            # Close the management menu
+            await reaction.message.delete()
 
 async def setup(bot):
     await bot.add_cog(DMForwarding(bot))
