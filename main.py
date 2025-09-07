@@ -214,9 +214,9 @@ async def on_ready():
     logger.info(f'Conectado como {bot.user} (ID: {bot.user.id})')
     
     # Configurar estado
-    status_type = os.getenv('STATUS', 'online').lower()
-    activity_type = os.getenv('ACTIVITY_TYPE', 'none').lower()
-    activity_name = os.getenv('ACTIVITY_NAME', 'Default Activity')
+    status_type = os.getenv('STATUS', 'dnd').lower()
+    activity_type = os.getenv('ACTIVITY_TYPE', 'watching').lower()
+    activity_name = os.getenv('ACTIVITY_NAME', 'Stormex Research Corporation')
 
     activity_dict = {
         'playing': discord.ActivityType.playing,
