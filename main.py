@@ -197,15 +197,25 @@ class SilentBot(commands.Bot):
                     logger.error(f"Error al sincronizar {cog_name} global: {e}")
 
     async def load_all_cogs(self):
-        if not os.path.exists('./commands'):
+        # Cargar cogs de la carpeta commands
+        if os.path.exists('./commands'):
+            for filename in os.listdir('./commands'):
+                if filename.endswith('.py') and filename != '__init__.py':
+                    cog_name = f'commands.{filename[:-3]}'
+                    module_path = os.path.join('./commands', filename)
+                    await self.load_cog_safely(cog_name, module_path)
+        else:
             logger.warning("No se encontró el directorio commands")
-            return
-            
-        for filename in os.listdir('./commands'):
-            if filename.endswith('.py') and filename != '__init__.py':
-                cog_name = f'commands.{filename[:-3]}'
-                module_path = os.path.join('./commands', filename)
-                await self.load_cog_safely(cog_name, module_path)
+        
+        # Cargar cogs de la carpeta scripts
+        if os.path.exists('./scripts'):
+            for filename in os.listdir('./scripts'):
+                if filename.endswith('.py') and filename != '__init__.py':
+                    cog_name = f'scripts.{filename[:-3]}'
+                    module_path = os.path.join('./scripts', filename)
+                    await self.load_cog_safely(cog_name, module_path)
+        else:
+            logger.warning("No se encontró el directorio scripts")
 
 bot = SilentBot()
 
@@ -258,9 +268,9 @@ async def on_command_error(ctx, error):
 async def on_app_command_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
     logger.error(f"Error en comando de aplicación: {error}")
     if interaction.response.is_done():
-        await interaction.followup.send("Ocurrió un error al ejecutar el comando.")
+        await interaction.followup.send("An error occurred while executing the command.")
     else:
-        await interaction.response.send_message("Ocurrió un error al ejecutar el comando.")
+        await interaction.response.send_message("An error occurred while executing the command.")
 
 # Verificar el token
 token = os.getenv('DISCORD_TOKEN')
